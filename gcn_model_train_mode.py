@@ -1,5 +1,6 @@
 import math
 import time
+import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,6 +10,7 @@ from torch.nn.modules.module import Module
 from torch.nn.parameter import Parameter
 from sklearn.model_selection import StratifiedKFold
 from sklearn import metrics
+import wandb_logger
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -17,6 +19,8 @@ dropout = 0.5
 lr = 0.01 
 weight_decay = 1e-5
 fastmode = 'store_true'
+EPOCH_LOG_INTERVAL = 25
+LOGGER = logging.getLogger(__name__)
 
 def encode_onehot(labels):
     classes=sorted(list(set(labels)),reverse=True)
@@ -63,7 +67,7 @@ def load_data(mlp_or_not,graph,node_file,input_sample):
         tid2name[c].append(ele[2])
         c+=1
 
-    print('Loading {} dataset...'.format(graph+' plus '+node_file))
+    LOGGER.info('Loading dataset: %s plus %s', graph, node_file)
     idx_features_labels = np.genfromtxt("{}".format(node_file),dtype=np.dtype(str))
     features=idx_features_labels[:, 1:-1]
     features=features.astype(float)
@@ -173,7 +177,35 @@ def train(epoch,train_idx,val_idx,model,optimizer,features,adj,labels,
     loss_val = torch.nn.functional.nll_loss(output[val_idx], labels[val_idx])
     acc_val = accuracy(output[val_idx], labels[val_idx])
     auc_val = AUC(output[val_idx], labels[val_idx])
-    print('Epoch: {:04d}'.format(epoch+1),'loss_train: {:.4f}'.format(loss_train.item()),'acc_train: {:.4f}'.format(acc_train.item()),'loss_val: {:.4f}'.format(loss_val.item()),'acc_val: {:.4f}'.format(acc_val.item()),'time: {:.4f}s'.format(time.time() - t),'AUC_train: {:.4f}'.format(auc_train.item()),'AUC_val: {:.4f}'.format(auc_val.item()))
+    if epoch == 0 or (epoch + 1) % EPOCH_LOG_INTERVAL == 0:
+        LOGGER.info(
+            'Epoch %04d | loss_train=%.4f acc_train=%.4f loss_val=%.4f acc_val=%.4f AUC_train=%.4f AUC_val=%.4f time=%.4fs',
+            epoch + 1,
+            loss_train.item(),
+            acc_train.item(),
+            loss_val.item(),
+            acc_val.item(),
+            auc_train.item(),
+            auc_val.item(),
+            time.time() - t,
+        )
+
+    wandb_logger.log({
+        'train_mode/fold': int(fold),
+        'train_mode/epoch': int(epoch + 1),
+        'train_mode/loss_train': float(loss_train.item()),
+        'train_mode/acc_train': float(acc_train.item()),
+        'train_mode/loss_val': float(loss_val.item()),
+        'train_mode/acc_val': float(acc_val.item()),
+        'train_mode/auc_train': float(auc_train.item()),
+        'train_mode/auc_val': float(auc_val.item()),
+    })
+
+    if auc_val > max_val_auc:
+        wandb_logger.summary_update({
+            f'train_mode/fold_{fold}_best_val_auc': float(auc_val.item()),
+            f'train_mode/fold_{fold}_best_val_acc': float(acc_val.item()),
+        })
     result_detailed_file.write('Epoch: {:04d}'.format(epoch+1)+' loss_train: {:.4f}'.format(loss_train.item())+' acc_train: {:.4f}'.format(acc_train.item())+' loss_val: {:.4f}'.format(loss_val.item())+' acc_val: {:.4f}'.format(acc_val.item())+' time: {:.4f}s'.format(time.time() - t)+' AUC_train: {:.4f}'.format(auc_train.item())+' AUC_val: {:.4f}'.format(auc_val.item())+'\n')
     if save_val_results and auc_val>max_val_auc and record==1:
         o3=open(result_dir+'/sample_prob_fold'+str(fold)+'_val.txt','w+')
@@ -200,7 +232,12 @@ def test(model,idx_test,features,adj,labels,result_detailed_file,max_test_auc,re
     preds=output[idx_test].max(1)[1].type_as(labels[idx_test])
     acc_test=accuracy(output[idx_test],labels[idx_test])
     auc_test=AUC(output[idx_test], labels[idx_test])
-    print(" | Test set results:","loss={:.4f}".format(loss_test.item()),"accuracy={:.4f}".format(acc_test.item()),"AUC={:.4f}".format(auc_test.item()))
+    LOGGER.info(
+        'Test set results | loss=%.4f accuracy=%.4f AUC=%.4f',
+        loss_test.item(),
+        acc_test.item(),
+        auc_test.item(),
+    )
     result_detailed_file.write(" | Test set results:"+"loss={:.4f}".format(loss_test.item())+" accuracy: {:.4f}".format(acc_test.item())+" AUC: {:.4f}".format(auc_test.item())+'\n')
     if auc_test>max_test_auc and record==1:
         o3=open(result_dir+'/sample_prob_fold'+str(fn)+'_test.txt','w+')

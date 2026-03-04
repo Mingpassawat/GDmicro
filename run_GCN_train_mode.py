@@ -1,5 +1,6 @@
 import re
 import os
+import logging
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -14,6 +15,9 @@ from random import sample
 import random
 import uuid
 from numpy import savetxt
+from tqdm import tqdm
+
+LOGGER = logging.getLogger(__name__)
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -52,7 +56,7 @@ def select_features(train_raw,node_raw,train_idx,feature_dir,meta_file,disease,f
             om.write(line+'\n')
         c+=1
     om.close()
-    print('Run the command: Rscript feature_select_model_nodirect.R tem_e2.tsv tem_meta.tsv eggNOG '+disease)
+    LOGGER.info('Run command: Rscript feature_select_model_nodirect.R tem_e2.tsv tem_meta.tsv eggNOG %s', disease)
     os.system('Rscript feature_select_model_nodirect.R tem_e2.tsv tem_meta.tsv eggNOG '+disease)
     os.system('mv tem_meta.tsv '+feature_dir+'/meta_Fold'+str(fold_number)+'.tsv')
     f2=open('eggNOG_feature_weight.csv','r')
@@ -68,7 +72,7 @@ def select_features(train_raw,node_raw,train_idx,feature_dir,meta_file,disease,f
         if ele[-1]=='NA':continue
         if float(ele[-1])==0:continue
         d[ele[0]]=''
-    print(':: Log: There are '+str(len(d))+'/'+str(t)+' features selected!\n')
+    LOGGER.info('Feature selection kept %s/%s features.', str(len(d)), str(t))
     os.system('mv eggNOG_feature_weight.csv '+feature_dir+'/eggNOG_feature_weight_Fold'+str(fold_number)+'.csv')
     os.system('mv eggNOG_evaluation.pdf '+feature_dir+'/eggNOG_evaluation_Fold'+str(fold_number)+'.pdf')
     f3=open(node_raw,'r')
@@ -158,7 +162,7 @@ def iter_run(features,train_id,test_id , adj, labels, ot2, result_dir,classes_di
     model = GAT(in_features=features.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-5)
     max_train_auc = 0
-    for epoch in range(150):
+    for epoch in tqdm(range(150), desc='DSP perturb train', leave=False):
         train_auc, _, train_prob = train(epoch, np.array(train_id), np.array(test_id), model, optimizer, features, adj, labels, ot2, max_train_auc, result_dir, 0, classes_dict, idx_to_subjectId,  0)
         train_auc = float(train_auc)
         if train_auc > max_train_auc:
@@ -206,13 +210,12 @@ def detect_dsp(graph, node_raw,feature_id, labels_raw,labels,adj, train_id, test
                 p+=1
         if p>=0 and n>=0:
             tg.append(s)
-    print('There are '+str(len(tg))+' samples have both >=0 healthy and disease neighbors.')
+    LOGGER.info('Samples with both healthy and disease neighbors: %s', str(len(tg)))
     # model = GCN(nfeat=features.shape[1], hidden_layer=32, nclass=labels.max().item() + 1, dropout=0.5)
     model = GAT(in_features=features.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-5)
     max_train_auc=0
-    for epoch in range(150):
-        print('DSD_Raw')
+    for epoch in tqdm(range(150), desc='DSP raw train', leave=False):
         train_auc, _, train_prob = train(epoch, np.array(train_id), np.array(test_id), model, optimizer, features,adj, labels, ot2, max_train_auc, result_dir, 0, classes_dict, idx_to_subjectId, 0)
         train_auc = float(train_auc)
         if train_auc > max_train_auc:
@@ -228,7 +231,7 @@ def detect_dsp(graph, node_raw,feature_id, labels_raw,labels,adj, train_id, test
         if prl==labels[t]:
             tgc.append(t)
 
-    print(len(tgc),' samples will be used to detect driver species...')
+    LOGGER.info('Samples used for driver species detection: %s', str(len(tgc)))
     res={} # sample_id -> feature_id -> [0.55,-1,-1,0.52,0.33,-1,-1]
     arr=[] # sample_id list
     for t  in tgc:
@@ -416,7 +419,7 @@ def feature_importance_check(feature_id,train_idx,val_idx,features,adj,labels,re
         res={}
         prob_matrix = []
         if cround==2:break
-        for i in feature_id:
+        for i in tqdm(feature_id, desc=f'Fold {fold_number+1} feature importance', leave=False):
             max_train_auc=0
             best_prob = []
             i=int(i)
@@ -459,7 +462,7 @@ def node_importance_check(selected,selected_arr,tem_train_id,val_idx,features,ad
     while True:
         res={}
         if cround==nnum+1:break
-        for i in tem_train_id:
+        for i in tqdm(tem_train_id, desc=f'Fold {fold_number+1} node importance r{cround}', leave=False):
             max_val_auc=0
             i=int(i)
             if i in selected:continue
@@ -580,9 +583,9 @@ def run(node_norm,train_raw,node_raw,meta_file,disease,out,kneighbor,rseed,cvfol
     result_detailed_file=open(result_detailed_dir,'w+')
     fold_number=0
 
-    for train_idx,val_idx in splits.split(features[:train_id],labels_raw[:train_id]):
+    for train_idx,val_idx in tqdm(splits.split(features[:train_id],labels_raw[:train_id]), total=cvfold, desc='CV folds'):
         result_detailed_file.write('Fold {}'.format(fold_number+1)+'\n')
-        print('Fold {}'.format(fold_number+1)+', Train:'+str(len(train_idx))+' Test:'+str(len(val_idx)))
+        LOGGER.info('Fold %d | Train: %d | Val: %d', fold_number+1, len(train_idx), len(val_idx))
 
         # Get P3_build_graph graph_final (0,1 for edge connection)
         graph = run_MLP_embedding_train_mode.build_graph_mlp(train_norm,train_idx,val_idx,meta_file,disease,fold_number+1,graph_dir,kneighbor,rseed,result_dir)
@@ -611,7 +614,7 @@ def run(node_norm,train_raw,node_raw,meta_file,disease,out,kneighbor,rseed,cvfol
         optimizer = torch.optim.Adam(model.parameters(),lr=0.01, weight_decay=1e-5)
         max_val_auc=0
 
-        for epoch in range(150):
+        for epoch in tqdm(range(150), desc=f'Fold {fold_number+1} GAT train', leave=False):
             _, val_auc, _ = train(epoch,train_idx,val_idx,model,optimizer,features,adj,labels,result_detailed_file,max_val_auc,result_dir,fold_number+1,classes_dict,idx_to_subjectId,1, save_val_results=True)
             if val_auc>max_val_auc:
                 max_val_auc=val_auc

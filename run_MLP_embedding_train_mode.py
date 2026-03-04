@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import logging
 import torch
 import torch.nn as nn
 import torch.utils.data as Data
@@ -8,6 +9,9 @@ from sklearn import metrics
 import build_graph_with_embedding_train_mode
 import random
 from copy import deepcopy
+import wandb_logger
+
+LOGGER = logging.getLogger(__name__)
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -118,7 +122,7 @@ def build_graph_mlp(inmatrixf,train_idx,val_idx,meta_file,disease,fold_number,gr
 
     max_test_acc=0
     max_test_auc=0
-    for _ in range(10):
+    for round_idx in range(10):
         best_auc=0
         mlpc_raw=MLPclassifica(nfeat=X_train.shape[1])
         optimizer=torch.optim.Adam(mlpc_raw.parameters(),lr=0.01,weight_decay=1e-5)
@@ -154,14 +158,29 @@ def build_graph_mlp(inmatrixf,train_idx,val_idx,meta_file,disease,fold_number,gr
         feature_out=np.array(feature_output)
         train_acc=accuracy_score(y_train_t,pre_lab)
         train_auc=AUC(output,y_train_t)
-        print("train_accuracy:",train_acc,"train_AUC:",train_auc)
         _,_,output=mlpc(X_val_nots)
         _,pre_lab=torch.max(output,1)
         feature_output_val=mlpc.featuremap.cpu()
         feature_out_val=np.array(feature_output_val)
         val_accuracy=accuracy_score(y_val_t,pre_lab)
         val_auc=AUC(output,y_val_t)
-        print("val_accuracy:",val_accuracy,"val_AUC:",val_auc)
+        LOGGER.info(
+            'GraphBuilder Fold %d Round %d | train_acc=%.4f train_auc=%.4f val_acc=%.4f val_auc=%.4f',
+            fold_number,
+            round_idx + 1,
+            float(train_acc),
+            float(train_auc),
+            float(val_accuracy),
+            float(val_auc),
+        )
+        wandb_logger.log({
+            'graph_builder/fold': int(fold_number),
+            'graph_builder/round': int(round_idx + 1),
+            'graph_builder/train_acc': float(train_acc),
+            'graph_builder/train_auc': float(train_auc),
+            'graph_builder/val_acc': float(val_accuracy),
+            'graph_builder/val_auc': float(val_auc),
+        })
         train_res_stat_file.write("Train accuracy: "+str(train_acc)+" Train AUC: "+str(train_auc)+"\nVal accuracy: "+str(val_accuracy)+" Val AUC: "+str(val_auc)+'\n')
         if val_auc>max_test_auc:
             max_test_auc=val_auc

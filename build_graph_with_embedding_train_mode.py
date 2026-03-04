@@ -1,15 +1,19 @@
 import re
 import os
+import logging
 import trans_embedding_vector
 import preprocess_matrix_pca
 import transform_matrix_anno
 import numpy as np
 import higra as hg
 import networkx as nx
+import wandb_logger
 from collections import defaultdict
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('agg')
+
+LOGGER = logging.getLogger(__name__)
 
 def check_trans_visualize_graph(meta_file,outgraph,build_graph_dir,pre,olog):
     G=nx.Graph()
@@ -51,9 +55,11 @@ def check_trans_visualize_graph(meta_file,outgraph,build_graph_dir,pre,olog):
     o.close()
 
     G.add_edges_from(all_edges)
-    print('The number of edges of '+pre+' PCA KNN graph:',G.number_of_edges())
+    LOGGER.info('Graph %s PCA-KNN | edges=%d', pre, G.number_of_edges())
+    wandb_logger.log({'graph/edges': int(G.number_of_edges())})
     olog.write('The number of edges of '+pre+' PCA KNN graph: '+str(G.number_of_edges())+'\n')
-    print('Whether '+pre+' PCA KNN graph connected? ',nx.is_connected(G),'\n')
+    LOGGER.info('Graph %s PCA-KNN | connected=%s', pre, str(nx.is_connected(G)))
+    wandb_logger.log({'graph/connected': int(nx.is_connected(G))})
     olog.write('Whether '+pre+' PCA KNN graph connected? '+str(nx.is_connected(G))+'\n\n')
     plt.figure()
     color_map=[]
@@ -145,7 +151,8 @@ def build_graph_given_matrix_with_knn(check1,check2,pca_file,meta_file,knn_nn,bu
         for e in drecord[r]:
             tem.append(drname[e]+':'+d[e]+':'+drecord[r][e])
         ot.write('\t'.join(tem)+'\n')
-    print('The acc of '+pre+' knn graph: ',correct/total,correct,'/',total)
+    LOGGER.info('Graph %s KNN label agreement | accuracy=%.4f (%d/%d)', pre, float(correct/total), correct, total)
+    wandb_logger.log({'graph/label_agreement_acc': float(correct/total)})
     build_log_file.write('The acc of '+pre+' knn graph: '+str(float(correct/total))+' '+str(correct)+'/'+str(total)+'\n')
     check_trans_visualize_graph(meta_file,outgraph,build_graph_dir,pre,build_log_file) 
 

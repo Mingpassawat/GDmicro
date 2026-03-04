@@ -2,10 +2,24 @@ import re
 import os
 import sys
 import argparse
+import logging
 
 import run_GCN_train_mode
 import run_GCN_test_mode
 import GDmicro_preprocess
+import wandb_logger
+
+LOGGER = logging.getLogger(__name__)
+
+
+def configure_logging():
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
 
 def load_var(inv,infile):
     return (1, infile) if os.path.exists(infile) else (0, inv)
@@ -53,6 +67,7 @@ def scan_input(indir, disease, unique_feature, mode='train'):
     )
 
 def main():
+    configure_logging()
     usage="GDmicro - Use GCN and domain adaptation to predict disease based on microbiome data."
     parser=argparse.ArgumentParser(prog="GDmicro.py",description=usage)
     parser.add_argument('-i','--input_file',dest='input_file',type=str,help="The directory of the input csv file.")
@@ -72,6 +87,11 @@ def main():
     #parser.add_argument('-v','--embed_vector_node',dest='vnode',type=str,help="If set to 1, then will apply domain adaptation network to node features, and use embedding vectors as nodes.. (default: 0)")
     #parser.add_argument('-u','--unique_feature',dest='uf',type=str,help="If set to 1, then will only use compositional data to build edges and as node features.")
     parser.add_argument('-o','--outdir',dest='outdir',type=str,help="Output directory of test results. (Default: GDmicro_res)")
+    parser.add_argument('--wandb',dest='wandb_enable',type=str,help="Enable W&B tracking. 1=on, 0=off. (default: 1)")
+    parser.add_argument('--wandb_project',dest='wandb_project',type=str,help="W&B project name. (default: GDmicro)")
+    parser.add_argument('--wandb_entity',dest='wandb_entity',type=str,help="W&B entity/team name. (optional)")
+    parser.add_argument('--wandb_name',dest='wandb_name',type=str,help="W&B run name. (optional)")
+    parser.add_argument('--wandb_mode',dest='wandb_mode',type=str,help="W&B mode: online/offline/disabled. (default: online)")
 
     args = parser.parse_args()
     input_file = args.input_file
@@ -87,6 +107,11 @@ def main():
     rseed=args.rseed
     doadpt=args.doadpt
     output_dir=args.outdir
+    wandb_enable=args.wandb_enable
+    wandb_project=args.wandb_project
+    wandb_entity=args.wandb_entity
+    wandb_name=args.wandb_name
+    wandb_mode=args.wandb_mode
     close_cv=0
     reverse = 0
     vnode = 0
@@ -104,19 +129,50 @@ def main():
     rseed = int(rseed) if rseed else 0
     doadpt = int(doadpt) if doadpt else 1
     output_dir = output_dir if output_dir else "GDmicro_res"
+    wandb_enable = int(wandb_enable) if wandb_enable is not None else 1
+    wandb_project = wandb_project if wandb_project else "GDmicro"
+    wandb_mode = wandb_mode if wandb_mode else "online"
 
-    indir, oin = GDmicro_preprocess.preprocess(input_file,train_mode,disease,output_dir)
-    if train_mode == 0:
-        node_norm,train_raw,node_raw,meta,train_norm,pre_features = scan_input(indir,disease,unique_feature, mode='test')
-        run_GCN_test_mode.run(node_norm,train_raw,node_raw,meta,disease,output_dir,kneighbor,pre_features,rseed,cvfold,doadpt,train_norm,fnum,nnum,close_cv,anode,reverse,vnode,unique_feature,bsize,run_feature_importance,oin)
-    else:
-        # node_norm = (samples, idx+features+label)
-        # train_raw = raw data without meta data
-        # node_raw = (samples, idx+features+label) with normalized
-        # meta = metadata
-        # train_norm = normalized data without meta data
-        node_norm,train_raw,node_raw,meta,train_norm,pre_features = scan_input(indir,disease,unique_feature, mode='train')
-        run_GCN_train_mode.run(node_norm,train_raw,node_raw,meta,disease,output_dir,kneighbor,rseed,cvfold,train_norm,fnum,nnum,anode,run_feature_importance)
+    wandb_logger.init_wandb(
+        enabled=bool(wandb_enable),
+        project=wandb_project,
+        entity=wandb_entity,
+        run_name=wandb_name,
+        mode=wandb_mode,
+        tags=["train" if train_mode == 1 else "test", disease],
+        config={
+            "input_file": input_file,
+            "train_mode": train_mode,
+            "disease": disease,
+            "kneighbor": kneighbor,
+            "batch_size": bsize,
+            "apply_node": anode,
+            "node_num": nnum,
+            "feature_num": fnum,
+            "cvfold": cvfold,
+            "random_seed": rseed,
+            "domain_adapt": doadpt,
+            "run_feature_importance": run_feature_importance,
+            "output_dir": output_dir,
+        },
+    )
+    try:
+        indir, oin = GDmicro_preprocess.preprocess(input_file,train_mode,disease,output_dir)
+        if train_mode == 0:
+            LOGGER.info("Start testing...")
+            node_norm,train_raw,node_raw,meta,train_norm,pre_features = scan_input(indir,disease,unique_feature, mode='test')
+            run_GCN_test_mode.run(node_norm,train_raw,node_raw,meta,disease,output_dir,kneighbor,pre_features,rseed,cvfold,doadpt,train_norm,fnum,nnum,close_cv,anode,reverse,vnode,unique_feature,bsize,run_feature_importance,oin)
+        else:
+            # node_norm = (samples, idx+features+label)
+            # train_raw = raw data without meta data
+            # node_raw = (samples, idx+features+label) with normalized
+            # meta = metadata
+            # train_norm = normalized data without meta data
+            node_norm,train_raw,node_raw,meta,train_norm,pre_features = scan_input(indir,disease,unique_feature, mode='train')
+            LOGGER.info('Start training...')
+            run_GCN_train_mode.run(node_norm,train_raw,node_raw,meta,disease,output_dir,kneighbor,rseed,cvfold,train_norm,fnum,nnum,anode,run_feature_importance)
+    finally:
+        wandb_logger.finish()
 
 if __name__=="__main__":
     sys.exit(main())

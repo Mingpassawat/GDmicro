@@ -1,5 +1,6 @@
 import math
 import time
+import logging
 import torch
 import torch.nn as nn
 import numpy as np
@@ -13,6 +14,7 @@ import random
 #import calculate_avg_acc_of_cross_validation_test
 from sklearn import metrics
 from scipy import stats
+import wandb_logger
 
 
 
@@ -22,6 +24,8 @@ dropout = 0.5
 lr = 0.01 
 weight_decay = 1e-5
 fastmode = 'store_true'
+EPOCH_LOG_INTERVAL = 25
+LOGGER = logging.getLogger(__name__)
 
 
 def encode_onehot(labels):
@@ -88,7 +92,7 @@ def load_data(mlp_or_not,graph,node_file,input_sample):
 
 
 
-    print('Loading {} dataset...'.format(graph+' plus '+node_file))
+    LOGGER.info('Loading dataset: %s plus %s', graph, node_file)
     idx_features_labels = np.genfromtxt("{}".format(node_file),dtype=np.dtype(str))
     #print(idx_features_labels)
     features=idx_features_labels[:, 1:-1]
@@ -273,7 +277,19 @@ def train(epoch,idx_train_in,idx_val_in,model,optimizer,features,adj,labels,o,ma
             acc_val = accuracy(output[idx_val_in], labels[idx_val_in])
             auc_val = AUC(output[idx_val_in], labels[idx_val_in])
     if close_cv==0:
-        print('Epoch: {:04d}'.format(epoch+1),'loss_train: {:.4f}'.format(loss_train.item()),'acc_train: {:.4f}'.format(acc_train.item()),'loss_val: {:.4f}'.format(loss_val.item()),'acc_val: {:.4f}'.format(acc_val.item()),'time: {:.4f}s'.format(time.time() - t),'AUC_train: {:.4f}'.format(auc_train.item()),'AUC_val: {:.4f}'.format(auc_val.item()))
+        if epoch == 0 or (epoch + 1) % EPOCH_LOG_INTERVAL == 0:
+            LOGGER.info('Epoch %04d | loss_train=%.4f acc_train=%.4f loss_val=%.4f acc_val=%.4f AUC_train=%.4f AUC_val=%.4f time=%.4fs',
+                        epoch+1, loss_train.item(), acc_train.item(), loss_val.item(), acc_val.item(), auc_train.item(), auc_val.item(), time.time() - t)
+        wandb_logger.log({
+            'test_mode/epoch': int(epoch + 1),
+            'test_mode/fold': int(fold),
+            'test_mode/loss_train': float(loss_train.item()),
+            'test_mode/acc_train': float(acc_train.item()),
+            'test_mode/loss_val': float(loss_val.item()),
+            'test_mode/acc_val': float(acc_val.item()),
+            'test_mode/auc_train': float(auc_train.item()),
+            'test_mode/auc_val': float(auc_val.item()),
+        })
 
         if wwl==1:
             o.write('Epoch: {:04d}'.format(epoch+1)+' loss_train: {:.4f}'.format(loss_train.item())+' acc_train: {:.4f}'.format(acc_train.item())+' loss_val: {:.4f}'.format(loss_val.item())+' acc_val: {:.4f}'.format(acc_val.item())+' time: {:.4f}s'.format(time.time() - t)+' AUC_train: {:.4f}'.format(auc_train.item())+' AUC_val: {:.4f}'.format(auc_val.item())+'')
@@ -297,7 +313,16 @@ def train(epoch,idx_train_in,idx_val_in,model,optimizer,features,adj,labels,o,ma
                 c+=1
         return auc_val
     else:
-        print('Epoch: {:04d}'.format(epoch+1),'loss_train: {:.4f}'.format(loss_train.item()),'acc_train: {:.4f}'.format(acc_train.item()))
+        if epoch == 0 or (epoch + 1) % EPOCH_LOG_INTERVAL == 0:
+            LOGGER.info('Epoch %04d | loss_train=%.4f acc_train=%.4f AUC_train=%.4f',
+                        epoch+1, loss_train.item(), acc_train.item(), auc_train.item())
+        wandb_logger.log({
+            'test_mode/epoch': int(epoch + 1),
+            'test_mode/fold': int(fold),
+            'test_mode/loss_train': float(loss_train.item()),
+            'test_mode/acc_train': float(acc_train.item()),
+            'test_mode/auc_train': float(auc_train.item()),
+        })
         if wwl==1:
             o.write('Epoch: {:04d}'.format(epoch+1)+' loss_train: {:.4f}'.format(loss_train.item())+' acc_train: {:.4f}'.format(acc_train.item())+' AUC_train: {:.4f}'.format(auc_train.item())+'')
         else:
@@ -329,11 +354,25 @@ def train_fs(epoch,idx_train_in,idx_val_in,model,optimizer,features,adj,labels,o
             auc_val = AUC(output[idx_val_in], labels[idx_val_in])
     if close_cv==0:       
         if wwl==1:
-            print('Epoch: {:04d}'.format(epoch+1),'loss_train: {:.4f}'.format(loss_train.item()),'acc_train: {:.4f}'.format(acc_train.item()),'loss_val: {:.4f}'.format(loss_val.item()),'acc_val: {:.4f}'.format(acc_val.item()),'time: {:.4f}s'.format(time.time() - t),'AUC_train: {:.4f}'.format(auc_train.item()),'AUC_val: {:.4f}'.format(auc_val.item()))
+            if epoch == 0 or (epoch + 1) % EPOCH_LOG_INTERVAL == 0:
+                LOGGER.info('FS Epoch %04d | loss_train=%.4f acc_train=%.4f loss_val=%.4f acc_val=%.4f AUC_train=%.4f AUC_val=%.4f time=%.4fs',
+                            epoch+1, loss_train.item(), acc_train.item(), loss_val.item(), acc_val.item(), auc_train.item(), auc_val.item(), time.time() - t)
             o.write('Epoch: {:04d}'.format(epoch+1)+' loss_train: {:.4f}'.format(loss_train.item())+' acc_train: {:.4f}'.format(acc_train.item())+' loss_val: {:.4f}'.format(loss_val.item())+' acc_val: {:.4f}'.format(acc_val.item())+' time: {:.4f}s'.format(time.time() - t)+' AUC_train: {:.4f}'.format(auc_train.item())+' AUC_val: {:.4f}'.format(auc_val.item())+'')
         else:
-            print('Epoch: {:04d}'.format(epoch+1),' loss_train: {:.4f}'.format(loss_train.item()),' acc_train: {:.4f}'.format(acc_train.item()),' time: {:.4f}s'.format(time.time() - t),' AUC_train: {:.4f}'.format(auc_train.item()))
+            if epoch == 0 or (epoch + 1) % EPOCH_LOG_INTERVAL == 0:
+                LOGGER.info('FS Epoch %04d | loss_train=%.4f acc_train=%.4f AUC_train=%.4f time=%.4fs',
+                            epoch+1, loss_train.item(), acc_train.item(), auc_train.item(), time.time() - t)
             o.write('Epoch: {:04d}'.format(epoch+1)+' loss_train: {:.4f}'.format(loss_train.item())+' acc_train: {:.4f}'.format(acc_train.item())+' time: {:.4f}s'.format(time.time() - t)+' AUC_train: {:.4f}'.format(auc_train.item())+'\n')
+        metrics_payload = {
+            'feature_stage/epoch': int(epoch + 1),
+            'feature_stage/fold': int(fold),
+            'feature_stage/loss_train': float(loss_train.item()),
+            'feature_stage/acc_train': float(acc_train.item()),
+            'feature_stage/auc_train': float(auc_train.item()),
+        }
+        if close_cv == 0 and wwl == 1:
+            metrics_payload['feature_stage/auc_val'] = float(auc_val)
+        wandb_logger.log(metrics_payload)
         if auc_val>max_val_auc and record==1:
             o3=open(rdir+'/sample_prob_fold'+str(fold)+'_val.txt','w+')
             output_res=torch.exp(output[idx_val_in])
@@ -352,11 +391,20 @@ def train_fs(epoch,idx_train_in,idx_val_in,model,optimizer,features,adj,labels,o
                 c+=1
         return auc_train,torch.exp(output).data.numpy()
     else:
-        print('Epoch: {:04d}'.format(epoch+1),'loss_train: {:.4f}'.format(loss_train.item()),'acc_train: {:.4f}'.format(acc_train.item()))
+        if epoch == 0 or (epoch + 1) % EPOCH_LOG_INTERVAL == 0:
+            LOGGER.info('FS Epoch %04d | loss_train=%.4f acc_train=%.4f AUC_train=%.4f',
+                        epoch+1, loss_train.item(), acc_train.item(), auc_train.item())
         if wwl==1:
             o.write('Epoch: {:04d}'.format(epoch+1)+' loss_train: {:.4f}'.format(loss_train.item())+' acc_train: {:.4f}'.format(acc_train.item())+' AUC_train: {:.4f}'.format(auc_train.item())+'')
         else:
             o.write('Epoch: {:04d}'.format(epoch+1)+' loss_train: {:.4f}'.format(loss_train.item())+' acc_train: {:.4f}'.format(acc_train.item())+' AUC_train: {:.4f}'.format(auc_train.item())+'\n')
+        wandb_logger.log({
+            'feature_stage/epoch': int(epoch + 1),
+            'feature_stage/fold': int(fold),
+            'feature_stage/loss_train': float(loss_train.item()),
+            'feature_stage/acc_train': float(acc_train.item()),
+            'feature_stage/auc_train': float(auc_train.item()),
+        })
         return auc_train,torch.exp(output).data.numpy()
         #if auc_train>max_val_auc and record==1:
 
@@ -421,7 +469,12 @@ def test(model,idx_test,features,adj,labels,o,max_test_auc,rdir,fn,classes_dict,
     acc_test=accuracy(output[idx_test],labels[idx_test])
     auc_test=AUC(output[idx_test], labels[idx_test])
     if oin==0:
-        print(" | Test set results:","loss={:.4f}".format(loss_test.item()),"accuracy={:.4f}".format(acc_test.item()),"AUC={:.4f}".format(auc_test.item()))
+        LOGGER.info('Test results | loss=%.4f accuracy=%.4f AUC=%.4f', loss_test.item(), acc_test.item(), auc_test.item())
+    wandb_logger.log({
+        'test_mode/test_loss': float(loss_test.item()),
+        'test_mode/test_acc': float(acc_test.item()),
+        'test_mode/test_auc': float(auc_test.item()),
+    })
     o.write(" | Test set results:"+"loss={:.4f}".format(loss_test.item())+" accuracy: {:.4f}".format(acc_test.item())+" AUC: {:.4f}".format(auc_test.item())+'\n')
     if auc_test>max_test_auc and record==1:
         o3=open(rdir+'/sample_prob_fold'+str(fn)+'_test.txt','w+')
@@ -451,7 +504,12 @@ def test_new_acc(model,idx_test,features,adj,labels,o,max_test_acc,rdir,fn,class
     if np.isnan(auc_test):
         auc_test=acc_test
     if oin==0:
-        print(" | Test set results:","loss={:.4f}".format(loss_test.item()),"accuracy={:.4f}".format(acc_test.item()),"AUC={:.4f}".format(auc_test.item()))
+        LOGGER.info('Test results | loss=%.4f accuracy=%.4f AUC=%.4f', loss_test.item(), acc_test.item(), auc_test.item())
+    wandb_logger.log({
+        'test_mode/test_loss': float(loss_test.item()),
+        'test_mode/test_acc': float(acc_test.item()),
+        'test_mode/test_auc': float(auc_test.item()),
+    })
     o.write(" | Test set results:"+"loss={:.4f}".format(loss_test.item())+" accuracy: {:.4f}".format(acc_test.item())+" AUC: {:.4f}".format(auc_test.item())+'\n')
     if acc_test>max_test_acc and record==1:
         o3=open(rdir+'/sample_prob_fold'+str(fn)+'_test.txt','w+')
