@@ -1,1 +1,6 @@
 results/
+*.csv
+*.log
+GDmicro_Res/
+.vscode/
+__pycache__/
