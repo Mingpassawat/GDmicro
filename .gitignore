@@ -4,3 +4,4 @@ results/
 GDmicro_Res/
 .vscode/
 __pycache__/
+wandb/
