@@ -8,6 +8,13 @@ LOGGER = logging.getLogger(__name__)
 _WANDB = None
 _WANDB_RUN = None
 _ENABLED = False
+_BASE_PROJECT = "GDmicro"
+_BASE_ENTITY = None
+_BASE_MODE = "online"
+_BASE_RUN_NAME = None
+_BASE_CONFIG = {}
+_BASE_TAGS = []
+_GROUP_NAME = None
 
 
 def _to_bool(value, default=False):
@@ -27,8 +34,11 @@ def init_wandb(
     mode: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None,
     tags: Optional[list] = None,
+    group_name: Optional[str] = None,
+    create_run: bool = True,
 ):
     global _WANDB, _WANDB_RUN, _ENABLED
+    global _BASE_PROJECT, _BASE_ENTITY, _BASE_MODE, _BASE_RUN_NAME, _BASE_CONFIG, _BASE_TAGS, _GROUP_NAME
 
     _ENABLED = _to_bool(enabled, default=True)
     if not _ENABLED:
@@ -45,12 +55,24 @@ def init_wandb(
     _WANDB = wandb_lib
 
     run_mode = mode or os.environ.get("WANDB_MODE", "online")
+    _BASE_PROJECT = project
+    _BASE_ENTITY = entity
+    _BASE_MODE = run_mode
+    _BASE_RUN_NAME = run_name
+    _BASE_CONFIG = config or {}
+    _BASE_TAGS = tags or []
+    _GROUP_NAME = group_name or os.environ.get("WANDB_RUN_GROUP")
+
+    if not create_run:
+        LOGGER.info("W&B prepared | project=%s mode=%s create_run=%s", project, run_mode, str(create_run))
+        return True
 
     try:
         _WANDB_RUN = _WANDB.init(
             project=project,
             entity=entity,
             name=run_name,
+            group=_GROUP_NAME,
             mode=run_mode,
             config=config or {},
             tags=tags or [],
@@ -62,6 +84,47 @@ def init_wandb(
         LOGGER.warning("Failed to initialize W&B (%s). Continuing without W&B.", exc)
         _WANDB_RUN = None
         _ENABLED = False
+        return False
+
+
+def start_fold_run(fold: int, total_folds: int, extra_config: Optional[Dict[str, Any]] = None):
+    global _WANDB_RUN, _GROUP_NAME
+    if not _ENABLED or _WANDB is None:
+        return False
+
+    try:
+        if _WANDB_RUN is not None:
+            _WANDB.finish()
+            _WANDB_RUN = None
+
+        if not _GROUP_NAME:
+            _GROUP_NAME = f"cv-{_WANDB.util.generate_id()}"
+
+        run_base_name = _BASE_RUN_NAME if _BASE_RUN_NAME else "GDmicro"
+        run_name = f"{run_base_name}-fold-{int(fold)}"
+        run_config = dict(_BASE_CONFIG)
+        run_config.update({
+            "fold": int(fold),
+            "total_folds": int(total_folds),
+        })
+        if extra_config:
+            run_config.update(extra_config)
+
+        _WANDB_RUN = _WANDB.init(
+            project=_BASE_PROJECT,
+            entity=_BASE_ENTITY,
+            name=run_name,
+            group=_GROUP_NAME,
+            job_type=f"fold-{int(fold)}",
+            mode=_BASE_MODE,
+            config=run_config,
+            tags=list(_BASE_TAGS) + [f"fold-{int(fold)}"],
+            reinit=True,
+        )
+        LOGGER.info("W&B fold run initialized | group=%s run=%s", _GROUP_NAME, run_name)
+        return True
+    except Exception as exc:
+        LOGGER.warning("Failed to start W&B fold run (%s).", exc)
         return False
 
 
@@ -89,6 +152,15 @@ def summary_update(values: Dict[str, Any]):
             _WANDB_RUN.summary[key] = value
     except Exception as exc:
         LOGGER.warning("W&B summary update failed (%s).", exc)
+
+
+def save_file(file_path: str):
+    if not is_enabled():
+        return
+    try:
+        _WANDB.save(file_path, policy='now')
+    except Exception as exc:
+        LOGGER.warning("W&B save file failed (%s).", exc)
 
 
 def finish():

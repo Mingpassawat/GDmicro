@@ -3,6 +3,7 @@ import os
 import sys
 import argparse
 import logging
+from pathlib import Path
 
 import run_GCN_train_mode
 import run_GCN_test_mode
@@ -91,6 +92,7 @@ def main():
     parser.add_argument('--wandb_project',dest='wandb_project',type=str,help="W&B project name. (default: GDmicro)")
     parser.add_argument('--wandb_entity',dest='wandb_entity',type=str,help="W&B entity/team name. (optional)")
     parser.add_argument('--wandb_name',dest='wandb_name',type=str,help="W&B run name. (optional)")
+    parser.add_argument('--wandb_group',dest='wandb_group',type=str,help="W&B run group for related runs. (optional)")
     parser.add_argument('--wandb_mode',dest='wandb_mode',type=str,help="W&B mode: online/offline/disabled. (default: online)")
 
     args = parser.parse_args()
@@ -111,6 +113,7 @@ def main():
     wandb_project=args.wandb_project
     wandb_entity=args.wandb_entity
     wandb_name=args.wandb_name
+    wandb_group=args.wandb_group
     wandb_mode=args.wandb_mode
     close_cv=0
     reverse = 0
@@ -133,13 +136,22 @@ def main():
     wandb_project = wandb_project if wandb_project else "GDmicro"
     wandb_mode = wandb_mode if wandb_mode else "online"
 
+    dataset_name = Path(input_file).stem if input_file else "dataset"
+    mode_name = "traincv" if train_mode == 1 else "test"
+    auto_run_name = f"{dataset_name}-{disease}-{mode_name}-s{rseed}"
+    wandb_name = wandb_name if wandb_name else auto_run_name
+    if wandb_group is None and train_mode == 1:
+        wandb_group = f"{dataset_name}-{disease}-{mode_name}"
+
     wandb_logger.init_wandb(
         enabled=bool(wandb_enable),
         project=wandb_project,
         entity=wandb_entity,
         run_name=wandb_name,
+        group_name=wandb_group,
         mode=wandb_mode,
         tags=["train" if train_mode == 1 else "test", disease],
+        create_run=(train_mode == 0),
         config={
             "input_file": input_file,
             "train_mode": train_mode,

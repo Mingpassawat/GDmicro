@@ -1,5 +1,6 @@
 import re
 import os
+import logging
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -16,6 +17,44 @@ from random import sample
 import random
 import uuid
 from numpy import savetxt
+import wandb_logger
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _log_final_metrics_to_wandb(summary_file):
+    if not os.path.exists(summary_file):
+        return
+
+    metric_map = {
+        'average train acc': 'avg_train_acc',
+        'average train AUC': 'avg_train_auc',
+        'average val acc': 'avg_val_acc',
+        'average val AUC': 'avg_val_auc',
+        'average test acc': 'avg_test_acc',
+        'average test AUC': 'avg_test_auc',
+    }
+
+    collected = {}
+    with open(summary_file, 'r') as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line.startswith('Final:'):
+                continue
+            for phrase, metric_key in metric_map.items():
+                if phrase in line:
+                    try:
+                        value = float(line.split()[-1])
+                        collected[metric_key] = value
+                    except Exception:
+                        pass
+
+    if not collected:
+        return
+
+    LOGGER.info('Final averages | %s', ', '.join([f"{k}={v:.4f}" for k, v in sorted(collected.items())]))
+    wandb_logger.summary_update({f'test_mode/{k}': v for k, v in collected.items()})
+    wandb_logger.log({f'test_mode/{k}': v for k, v in collected.items()})
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -1031,6 +1070,8 @@ def run(node_norm,train_raw,node_raw,meta,disease,out,kneighbor,pre_features,rse
         pack_output_wwl(tem,rdir,oin)
     else:
         pack_output_nl(tem,rdir)
+
+    _log_final_metrics_to_wandb(ofile2)
     feature_id=list(range(int(features.shape[1])))
     # Feature importance
     

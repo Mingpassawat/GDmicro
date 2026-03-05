@@ -8,6 +8,7 @@ LOGGER = logging.getLogger(__name__)
 def cal_acc_cv(infile,ofile):
     f=open(infile,'r')
     o=open(ofile,'w+')
+    r2_lines=[]
 
     dtrain={} # Fold id -> [train_acc]
     dval={} # Fold id -> [val_acc]
@@ -67,10 +68,15 @@ def cal_acc_cv(infile,ofile):
     bt_valu=[]
 
     for i in dtrain:
-        o.write('The best train acc of Fold '+str(i)+' is '+str(dtrainm[i])+'\n')
-        o.write('The best train AUC of Fold '+str(i)+' is '+str(dtrainum[i])+'\n')
-        o.write('The best val acc of Fold '+str(i)+' is '+str(dvalm[i])+'\n')
-        o.write('The best val AUC of Fold '+str(i)+' is '+str(dvalum[i])+'\n')
+        line1='The best train acc of Fold '+str(i)+' is '+str(dtrainm[i])
+        line2='The best train AUC of Fold '+str(i)+' is '+str(dtrainum[i])
+        line3='The best val acc of Fold '+str(i)+' is '+str(dvalm[i])
+        line4='The best val AUC of Fold '+str(i)+' is '+str(dvalum[i])
+        o.write(line1+'\n')
+        o.write(line2+'\n')
+        o.write(line3+'\n')
+        o.write(line4+'\n')
+        r2_lines.extend([line1, line2, line3, line4])
 
         LOGGER.info('CV Fold %s | best_train_acc=%.4f best_train_auc=%.4f best_val_acc=%.4f best_val_auc=%.4f',
                 str(i), float(dtrainm[i]), float(dtrainum[i]), float(dvalm[i]), float(dvalum[i]))
@@ -80,6 +86,12 @@ def cal_acc_cv(infile,ofile):
             'cv/best_train_auc': float(dtrainum[i]),
             'cv/best_val_acc': float(dvalm[i]),
             'cv/best_val_auc': float(dvalum[i]),
+        })
+        wandb_logger.summary_update({
+            f'cv/fold_{i}_best_train_acc': float(dtrainm[i]),
+            f'cv/fold_{i}_best_train_auc': float(dtrainum[i]),
+            f'cv/fold_{i}_best_val_acc': float(dvalm[i]),
+            f'cv/fold_{i}_best_val_auc': float(dvalum[i]),
         })
 
         avg_train.append(np.mean(dtrain[i]))
@@ -94,10 +106,15 @@ def cal_acc_cv(infile,ofile):
         bt_trainu.append(dtrainum[i])
         bt_valu.append(dvalum[i])
 
-    o.write('Final: The averaga train acc is '+str(np.mean(bt_train))+'\n')
-    o.write('Final: The average train AUC is '+str(np.mean(bt_trainu))+'\n')
-    o.write('Final: The average val acc is '+str(np.mean(bt_val))+'\n')
-    o.write('Final: The average val AUC is '+str(np.mean(bt_valu))+'\n')
+    line5='Final: The averaga train acc is '+str(np.mean(bt_train))
+    line6='Final: The average train AUC is '+str(np.mean(bt_trainu))
+    line7='Final: The average val acc is '+str(np.mean(bt_val))
+    line8='Final: The average val AUC is '+str(np.mean(bt_valu))
+    o.write(line5+'\n')
+    o.write(line6+'\n')
+    o.write(line7+'\n')
+    o.write(line8+'\n')
+    r2_lines.extend([line5, line6, line7, line8])
 
     LOGGER.info('CV Summary | avg_best_train_acc=%.4f avg_best_train_auc=%.4f avg_best_val_acc=%.4f avg_best_val_auc=%.4f',
                 float(np.mean(bt_train)), float(np.mean(bt_trainu)), float(np.mean(bt_val)), float(np.mean(bt_valu)))
@@ -106,5 +123,10 @@ def cal_acc_cv(infile,ofile):
         'cv/avg_best_train_auc': float(np.mean(bt_trainu)),
         'cv/avg_best_val_acc': float(np.mean(bt_val)),
         'cv/avg_best_val_auc': float(np.mean(bt_valu)),
+        'cv/r2_text': '\n'.join(r2_lines),
     })
-            
+
+    f.close()
+    o.close()
+    wandb_logger.save_file(ofile)
+

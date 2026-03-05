@@ -16,6 +16,7 @@ import random
 import uuid
 from numpy import savetxt
 from tqdm import tqdm
+import wandb_logger
 
 LOGGER = logging.getLogger(__name__)
 
@@ -584,6 +585,15 @@ def run(node_norm,train_raw,node_raw,meta_file,disease,out,kneighbor,rseed,cvfol
     fold_number=0
 
     for train_idx,val_idx in tqdm(splits.split(features[:train_id],labels_raw[:train_id]), total=cvfold, desc='CV folds'):
+        wandb_logger.start_fold_run(
+            fold=fold_number + 1,
+            total_folds=cvfold,
+            extra_config={
+                'disease': disease,
+                'train_size': int(len(train_idx)),
+                'val_size': int(len(val_idx)),
+            },
+        )
         result_detailed_file.write('Fold {}'.format(fold_number+1)+'\n')
         LOGGER.info('Fold %d | Train: %d | Val: %d', fold_number+1, len(train_idx), len(val_idx))
 
