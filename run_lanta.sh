@@ -1,9 +1,9 @@
 #!/bin/bash -l
 #SBATCH -p gpu
-#SBATCH --gres=gpu=1
+#SBATCH --gres=gpu=4
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem=32GB
-#SBATCH --time=48:00:00
+#SBATCH --time=100:00:00
 #SBATCH -J GDmicro_experiment
 #SBATCH -o logs/%x-%j.out
 #SBATCH -e logs/%x-%j.err
