@@ -88,12 +88,12 @@ def main():
     #parser.add_argument('-v','--embed_vector_node',dest='vnode',type=str,help="If set to 1, then will apply domain adaptation network to node features, and use embedding vectors as nodes.. (default: 0)")
     #parser.add_argument('-u','--unique_feature',dest='uf',type=str,help="If set to 1, then will only use compositional data to build edges and as node features.")
     parser.add_argument('-o','--outdir',dest='outdir',type=str,help="Output directory of test results. (Default: GDmicro_res)")
-    parser.add_argument('--wandb',dest='wandb_enable',type=str,help="Enable W&B tracking. 1=on, 0=off. (default: 1)")
+    parser.add_argument('--wandb',dest='wandb_enable',type=str,help="Enable W&B tracking. 1=on, 0=off. (default: 0)")
     parser.add_argument('--wandb_project',dest='wandb_project',type=str,help="W&B project name. (default: GDmicro)")
     parser.add_argument('--wandb_entity',dest='wandb_entity',type=str,help="W&B entity/team name. (optional)")
     parser.add_argument('--wandb_name',dest='wandb_name',type=str,help="W&B run name. (optional)")
     parser.add_argument('--wandb_group',dest='wandb_group',type=str,help="W&B run group for related runs. (optional)")
-    parser.add_argument('--wandb_mode',dest='wandb_mode',type=str,help="W&B mode: online/offline/disabled. (default: online)")
+    parser.add_argument('--wandb_mode',dest='wandb_mode',type=str,help="W&B mode: online/offline/disabled. (default: offline)")
 
     args = parser.parse_args()
     input_file = args.input_file
@@ -134,7 +134,7 @@ def main():
     output_dir = output_dir if output_dir else "GDmicro_res"
     wandb_enable = int(wandb_enable) if wandb_enable is not None else 1
     wandb_project = wandb_project if wandb_project else "GDmicro"
-    wandb_mode = wandb_mode if wandb_mode else "online"
+    wandb_mode = wandb_mode if wandb_mode else "offline"
 
     dataset_name = Path(input_file).stem if input_file else "dataset"
     mode_name = "traincv" if train_mode == 1 else "test"

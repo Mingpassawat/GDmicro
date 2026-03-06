@@ -19,7 +19,7 @@ conda activate gdmicro37
 set -euo pipefail
 
 export MPLBACKEND=Agg
-export WANDB_MODE=${WANDB_MODE:-online}
+export WANDB_MODE=${WANDB_MODE:-offline}
 
 echo "Welcome to LANTA"
 echo "Run directory: $PWD"
