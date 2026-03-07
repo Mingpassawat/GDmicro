@@ -19,6 +19,7 @@ from tqdm import tqdm
 import wandb_logger
 
 LOGGER = logging.getLogger(__name__)
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -160,7 +161,7 @@ def avg_score(avc,vnsa):
 
 def iter_run(features,train_id,test_id , adj, labels, ot2, result_dir,classes_dict, idx_to_subjectId):
     # model = GCN(nfeat=features.shape[1], hidden_layer=32, nclass=labels.max().item() + 1, dropout=0.5)
-    model = GAT(in_features=features.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1)
+    model = GAT(in_features=features.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1).to(features.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-5)
     max_train_auc = 0
     for epoch in tqdm(range(150), desc='DSP perturb train', leave=False):
@@ -181,7 +182,7 @@ def detect_dsp(graph, node_raw,feature_id, labels_raw,labels,adj, train_id, test
     features = np.array(features)
     features_raw=features.copy()
     features = sp.csr_matrix(features, dtype=np.float32)
-    features = torch.FloatTensor(np.array(features.todense()))
+    features = torch.FloatTensor(np.array(features.todense())).to(labels.device)
     feature_id = list(range(int(features.shape[1])))
     f=open(graph,'r')
     while True:
@@ -213,7 +214,7 @@ def detect_dsp(graph, node_raw,feature_id, labels_raw,labels,adj, train_id, test
             tg.append(s)
     LOGGER.info('Samples with both healthy and disease neighbors: %s', str(len(tg)))
     # model = GCN(nfeat=features.shape[1], hidden_layer=32, nclass=labels.max().item() + 1, dropout=0.5)
-    model = GAT(in_features=features.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1)
+    model = GAT(in_features=features.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1).to(features.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-5)
     max_train_auc=0
     for epoch in tqdm(range(150), desc='DSP raw train', leave=False):
@@ -426,9 +427,9 @@ def feature_importance_check(feature_id,train_idx,val_idx,features,adj,labels,re
             i=int(i)
             if i in selected:continue
             features_tem=[[x[i]] for x in features]
-            features_tem=torch.Tensor(features_tem)
+            features_tem=torch.Tensor(features_tem).to(features.device)
             # model=GCN(nfeat=features_tem.shape[1], hidden_layer=32, nclass=labels.max().item() + 1, dropout=0.5)
-            model = GAT(in_features=features_tem.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1)
+            model = GAT(in_features=features_tem.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1).to(features.device)
             optimizer = torch.optim.Adam(model.parameters(),lr=0.01, weight_decay=1e-5)
             for epoch in range(50):
                 train_auc, _, sample_prob = train(epoch,np.array(train_idx),np.array(val_idx),model,optimizer,features_tem,adj,labels,ot,max_train_auc,result_dir,fold_number+1,classes_dict,idx_to_subjectId,0)
@@ -470,7 +471,7 @@ def node_importance_check(selected,selected_arr,tem_train_id,val_idx,features,ad
             if i in val_idx:continue
             train_idx=selected_arr+[i]
             # model=GCN(nfeat=features.shape[1], hidden_layer=32, nclass=labels.max().item() + 1, dropout=0.5)
-            model = GAT(in_features=features.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1)
+            model = GAT(in_features=features.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1).to(features.device)
             optimizer = torch.optim.Adam(model.parameters(),lr=0.01, weight_decay=1e-5)
             for epoch in range(50):
                 _, val_auc, _ = train(epoch,np.array(train_idx),np.array(val_idx),model,optimizer,features,adj,labels,ot2,max_val_auc,result_dir,fold_number+1,classes_dict,idx_to_subjectId,0, save_val_results=True)
@@ -555,6 +556,7 @@ def load_metadata(meta_file):
 def run(node_norm,train_raw,node_raw,meta_file,disease,out,kneighbor,rseed,cvfold,train_norm,fnum,nnum,anode,run_feature_importance):
     if rseed != 0:
         setup_seed(rseed)
+    LOGGER.info('Training device: %s', DEVICE)
     
     species_name = load_species_name(train_norm)
 
@@ -562,6 +564,7 @@ def run(node_norm,train_raw,node_raw,meta_file,disease,out,kneighbor,rseed,cvfol
     features=idx_features_labels[:, 1:-1] # Remove idx, labels
     features=features.astype(float)
     features=np.array(features)
+    all_features = features.copy()
 
     # Value: Health or {Disease Name (Ex. T2D)}
     labels_raw = idx_features_labels[:, -1]
@@ -602,9 +605,9 @@ def run(node_norm,train_raw,node_raw,meta_file,disease,out,kneighbor,rseed,cvfol
 
         # Train and testing 
         labels,classes_dict = encode_onehot(labels_raw)
-        features = sp.csr_matrix(features, dtype=np.float32)
-        features=torch.FloatTensor(np.array(features.todense()))
-        labels = torch.LongTensor(np.where(labels)[1])
+        features_fold = sp.csr_matrix(all_features, dtype=np.float32)
+        features_fold = torch.FloatTensor(np.array(features_fold.todense())).to(DEVICE)
+        labels = torch.LongTensor(np.where(labels)[1]).to(DEVICE)
 
         idx = np.array(idx_features_labels[:, 0], dtype=np.int32)
         idx_map = {j: i for i, j in enumerate(idx)}
@@ -614,18 +617,18 @@ def run(node_norm,train_raw,node_raw,meta_file,disease,out,kneighbor,rseed,cvfol
         adj = adj + adj.T.multiply(adj.T > adj) - adj.multiply(adj.T > adj)
 
         adj = normalize(adj + sp.eye(adj.shape[0]))
-        adj = sparse_mx_to_torch_sparse_tensor(adj)
+        adj = sparse_mx_to_torch_sparse_tensor(adj).coalesce().to(DEVICE)
 
-        feature_id=list(range(int(features.shape[1])))
+        feature_id=list(range(int(features_fold.shape[1])))
         tem_train_id=list(range(train_id))
  
         # model=GCN(nfeat=features.shape[1], hidden_layer=32, nclass=labels.max().item() + 1, dropout=0.5)
-        model = GAT(in_features=features.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1)
+        model = GAT(in_features=features_fold.shape[1], n_hidden=32, n_heads=8, num_classes=labels.max().item() + 1).to(DEVICE)
         optimizer = torch.optim.Adam(model.parameters(),lr=0.01, weight_decay=1e-5)
         max_val_auc=0
 
         for epoch in tqdm(range(150), desc=f'Fold {fold_number+1} GAT train', leave=False):
-            _, val_auc, _ = train(epoch,train_idx,val_idx,model,optimizer,features,adj,labels,result_detailed_file,max_val_auc,result_dir,fold_number+1,classes_dict,idx_to_subjectId,1, save_val_results=True)
+            _, val_auc, _ = train(epoch,train_idx,val_idx,model,optimizer,features_fold,adj,labels,result_detailed_file,max_val_auc,result_dir,fold_number+1,classes_dict,idx_to_subjectId,1, save_val_results=True)
             if val_auc>max_val_auc:
                 max_val_auc=val_auc
 
@@ -635,7 +638,7 @@ def run(node_norm,train_raw,node_raw,meta_file,disease,out,kneighbor,rseed,cvfol
             feat_imp_local_file = open(result_dir + '/feature_local_importance_fold' + str(fold_number + 1) + '.txt', 'w+')
             uid=uuid.uuid1().hex
             ot=open(uid+'.log','w+')
-            species_id,sname=feature_importance_check(feature_id,train_idx,val_idx,features,adj,labels,result_dir,fold_number,classes_dict,idx_to_subjectId,feat_imp_fold_file,ot,species_name,fnum,feat_imp_local_file)
+            species_id,sname=feature_importance_check(feature_id,train_idx,val_idx,features_fold,adj,labels,result_dir,fold_number,classes_dict,idx_to_subjectId,feat_imp_fold_file,ot,species_name,fnum,feat_imp_local_file)
             ot.close()
             os.system('rm '+uid+'.log')
 
@@ -653,7 +656,7 @@ def run(node_norm,train_raw,node_raw,meta_file,disease,out,kneighbor,rseed,cvfol
             o6=open(result_dir+'/node_importance_combination_fold'+str(fold_number+1)+'.txt','w+')
             uid=uuid.uuid1().hex
             ot2=open(uid+'.log','w+')
-            node_importance_check(selected,selected_arr,tem_train_id,val_idx,features,adj,labels,result_dir,fold_number,classes_dict,idx_to_subjectId,o5,o6,ot2,nnum)
+            node_importance_check(selected,selected_arr,tem_train_id,val_idx,features_fold,adj,labels,result_dir,fold_number,classes_dict,idx_to_subjectId,o5,o6,ot2,nnum)
             ot2.close()
             os.system('rm '+uid+'.log')
 

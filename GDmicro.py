@@ -122,7 +122,7 @@ def main():
 
     # Set default values
     bsize = int(bsize) if bsize else 64
-    run_feature_importance = int(run_feature_importance) if run_feature_importance else 1
+    run_feature_importance = int(run_feature_importance) if run_feature_importance else 0
     anode = int(anode) if anode else 0
     nnum = int(nnum) if nnum else 20
     fnum = int(fnum) if fnum else 10

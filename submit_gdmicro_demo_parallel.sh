@@ -7,7 +7,7 @@ PARTITION=${PARTITION:-gpu}
 GPUS_PER_JOB=${GPUS_PER_JOB:-1}
 CPUS_PER_GPU=${CPUS_PER_GPU:-4}
 MEMORY=${MEMORY:-32G}
-TIME_LIMIT=${TIME_LIMIT:-100:00:00}
+TIME_LIMIT=${TIME_LIMIT:-24:00:00}
 CONDA_ENV=${CONDA_ENV:-gdmicro37}
 WANDB_ENABLE=${WANDB_ENABLE:-0}
 WANDB_MODE=${WANDB_MODE:-offline}
@@ -41,7 +41,7 @@ submit_one() {
     --gres="gpu:${GPUS_PER_JOB}" \
     --cpus-per-gpu="$CPUS_PER_GPU" \
     --mem="$MEMORY" \
-    --time="$TIME_LIMIT" \
+    --time="24:00:00" \
     --job-name="GDm_${job_name}" \
     --output="${LOG_DIR}/%x-%j.out" \
     --error="${LOG_DIR}/%x-%j.err" \

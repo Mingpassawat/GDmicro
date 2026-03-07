@@ -21,6 +21,21 @@ weight_decay = 1e-5
 fastmode = 'store_true'
 EPOCH_LOG_INTERVAL = 25
 LOGGER = logging.getLogger(__name__)
+_DEVICE_LOGGED = False
+
+
+def _log_device_once():
+    global _DEVICE_LOGGED
+    if _DEVICE_LOGGED:
+        return
+    LOGGER.info('PyTorch device in use: %s', device)
+    _DEVICE_LOGGED = True
+
+
+def _to_index_tensor(indices, device_obj):
+    if torch.is_tensor(indices):
+        return indices.to(device=device_obj, dtype=torch.long)
+    return torch.as_tensor(indices, dtype=torch.long, device=device_obj)
 
 def encode_onehot(labels):
     classes=sorted(list(set(labels)),reverse=True)
@@ -152,32 +167,38 @@ def accuracy(output,labels):
     return correct/len(labels)
 
 def AUC(output,labels):
-    output=torch.exp(output)
-    a=output.data.numpy()
-    preds=a[:,1]
-    fpr,tpr,_ = metrics.roc_curve(np.array(labels),np.array(preds))
+    probs = torch.exp(output).detach().cpu().numpy()
+    preds = probs[:, 1]
+    if torch.is_tensor(labels):
+        labels_np = labels.detach().cpu().numpy()
+    else:
+        labels_np = np.array(labels)
+    fpr,tpr,_ = metrics.roc_curve(labels_np, np.array(preds))
     auc=metrics.auc(fpr,tpr)
     return auc
 
 # features = node_norm
 def train(epoch,train_idx,val_idx,model,optimizer,features,adj,labels,
           result_detailed_file,max_val_auc,result_dir,fold,classes_dict,tid2name,record, save_val_results = False):
+    _log_device_once()
     t=time.time()
+    train_idx_t = _to_index_tensor(train_idx, labels.device)
+    val_idx_t = _to_index_tensor(val_idx, labels.device)
     model.train()
     optimizer.zero_grad()
     output=model(features,adj)
-    loss_train=torch.nn.functional.nll_loss(output[train_idx], labels[train_idx])
-    acc_train = accuracy(output[train_idx], labels[train_idx])
-    auc_train=AUC(output[train_idx], labels[train_idx])
+    loss_train=torch.nn.functional.nll_loss(output[train_idx_t], labels[train_idx_t])
+    acc_train = accuracy(output[train_idx_t], labels[train_idx_t])
+    auc_train=AUC(output[train_idx_t], labels[train_idx_t])
     loss_train.backward()
     optimizer.step()
 
     model.eval()
     output=model(features,adj)
-    loss_val = torch.nn.functional.nll_loss(output[val_idx], labels[val_idx])
-    acc_val = accuracy(output[val_idx], labels[val_idx])
-    auc_val = AUC(output[val_idx], labels[val_idx])
-    if epoch == 0 or (epoch + 1) % EPOCH_LOG_INTERVAL == 0:
+    loss_val = torch.nn.functional.nll_loss(output[val_idx_t], labels[val_idx_t])
+    acc_val = accuracy(output[val_idx_t], labels[val_idx_t])
+    auc_val = AUC(output[val_idx_t], labels[val_idx_t])
+    if record == 1 and (epoch == 0 or (epoch + 1) % EPOCH_LOG_INTERVAL == 0):
         LOGGER.info(
             'Epoch %04d | loss_train=%.4f acc_train=%.4f loss_val=%.4f acc_val=%.4f AUC_train=%.4f AUC_val=%.4f time=%.4fs',
             epoch + 1,
@@ -190,26 +211,28 @@ def train(epoch,train_idx,val_idx,model,optimizer,features,adj,labels,
             time.time() - t,
         )
 
-    wandb_logger.log({
-        'train_mode/fold': int(fold),
-        'train_mode/epoch': int(epoch + 1),
-        'train_mode/loss_train': float(loss_train.item()),
-        'train_mode/acc_train': float(acc_train.item()),
-        'train_mode/loss_val': float(loss_val.item()),
-        'train_mode/acc_val': float(acc_val.item()),
-        'train_mode/auc_train': float(auc_train.item()),
-        'train_mode/auc_val': float(auc_val.item()),
-    })
-
-    if auc_val > max_val_auc:
-        wandb_logger.summary_update({
-            f'train_mode/fold_{fold}_best_val_auc': float(auc_val.item()),
-            f'train_mode/fold_{fold}_best_val_acc': float(acc_val.item()),
+    if record == 1:
+        wandb_logger.log({
+            'train_mode/fold': int(fold),
+            'train_mode/epoch': int(epoch + 1),
+            'train_mode/loss_train': float(loss_train.item()),
+            'train_mode/acc_train': float(acc_train.item()),
+            'train_mode/loss_val': float(loss_val.item()),
+            'train_mode/acc_val': float(acc_val.item()),
+            'train_mode/auc_train': float(auc_train.item()),
+            'train_mode/auc_val': float(auc_val.item()),
         })
+
+        if auc_val > max_val_auc:
+            wandb_logger.summary_update({
+                f'train_mode/fold_{fold}_best_val_auc': float(auc_val.item()),
+                f'train_mode/fold_{fold}_best_val_acc': float(acc_val.item()),
+            })
     result_detailed_file.write('Epoch: {:04d}'.format(epoch+1)+' loss_train: {:.4f}'.format(loss_train.item())+' acc_train: {:.4f}'.format(acc_train.item())+' loss_val: {:.4f}'.format(loss_val.item())+' acc_val: {:.4f}'.format(acc_val.item())+' time: {:.4f}s'.format(time.time() - t)+' AUC_train: {:.4f}'.format(auc_train.item())+' AUC_val: {:.4f}'.format(auc_val.item())+'\n')
     if save_val_results and auc_val>max_val_auc and record==1:
         o3=open(result_dir+'/sample_prob_fold'+str(fold)+'_val.txt','w+')
-        output_res=torch.exp(output[val_idx]).data.numpy()
+        output_res = torch.exp(output[val_idx_t]).detach().cpu().numpy()
+        val_idx_cpu = val_idx_t.detach().cpu().numpy().tolist()
         
         c=0
         dt={}
@@ -219,19 +242,21 @@ def train(epoch,train_idx,val_idx,model,optimizer,features,adj,labels,
             else:
                 dt[1]=n
         for a in output_res:
-            nt=labels[val_idx[c]].data.numpy()
-            o3.write(tid2name[int(val_idx[c])]+'\t'+str(a[0])+'\t'+str(a[1])+'\t'+str(labels[val_idx[c]].data.numpy())+'\t'+str(dt[int(nt)])+'\n')
+            idx_cur = int(val_idx_cpu[c])
+            nt = int(labels[idx_cur].detach().cpu().item())
+            o3.write(tid2name[idx_cur]+'\t'+str(a[0])+'\t'+str(a[1])+'\t'+str(nt)+'\t'+str(dt[int(nt)])+'\n')
             c+=1
     
-    return auc_train, auc_val, torch.exp(output).data.numpy()
+    return auc_train, auc_val, torch.exp(output).detach().cpu().numpy()
 
 def test(model,idx_test,features,adj,labels,result_detailed_file,max_test_auc,result_dir,fn,classes_dict,tid2name,record):
+    idx_test_t = _to_index_tensor(idx_test, labels.device)
     model.eval()
     output=model(features,adj)
-    loss_test=torch.nn.functional.nll_loss(output[idx_test], labels[idx_test])
-    preds=output[idx_test].max(1)[1].type_as(labels[idx_test])
-    acc_test=accuracy(output[idx_test],labels[idx_test])
-    auc_test=AUC(output[idx_test], labels[idx_test])
+    loss_test=torch.nn.functional.nll_loss(output[idx_test_t], labels[idx_test_t])
+    preds=output[idx_test_t].max(1)[1].type_as(labels[idx_test_t])
+    acc_test=accuracy(output[idx_test_t],labels[idx_test_t])
+    auc_test=AUC(output[idx_test_t], labels[idx_test_t])
     LOGGER.info(
         'Test set results | loss=%.4f accuracy=%.4f AUC=%.4f',
         loss_test.item(),
@@ -241,8 +266,8 @@ def test(model,idx_test,features,adj,labels,result_detailed_file,max_test_auc,re
     result_detailed_file.write(" | Test set results:"+"loss={:.4f}".format(loss_test.item())+" accuracy: {:.4f}".format(acc_test.item())+" AUC: {:.4f}".format(auc_test.item())+'\n')
     if auc_test>max_test_auc and record==1:
         o3=open(result_dir+'/sample_prob_fold'+str(fn)+'_test.txt','w+')
-        output_res=torch.exp(output[idx_test])
-        output_res=output_res.data.numpy()
+        output_res = torch.exp(output[idx_test_t]).detach().cpu().numpy()
+        idx_test_cpu = idx_test_t.detach().cpu().numpy().tolist()
         c=0
         dt={}
         for n in classes_dict:
@@ -251,8 +276,9 @@ def test(model,idx_test,features,adj,labels,result_detailed_file,max_test_auc,re
             else:
                 dt[1]=n
         for a in output_res:
-            nt=labels[idx_test[c]].data.numpy()
-            o3.write(tid2name[int(idx_test[c])]+'\t'+str(a[0])+'\t'+str(a[1])+'\t'+str(labels[idx_test[c]].data.numpy())+'\t'+str(dt[int(nt)])+'\n')
+            idx_cur = int(idx_test_cpu[c])
+            nt = int(labels[idx_cur].detach().cpu().item())
+            o3.write(tid2name[idx_cur]+'\t'+str(a[0])+'\t'+str(a[1])+'\t'+str(nt)+'\t'+str(dt[int(nt)])+'\n')
             c+=1
     return auc_test
 
